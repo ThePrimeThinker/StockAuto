@@ -1,0 +1,73 @@
+import pandas as pd
+
+# Load data
+futures_file = "C:\\Users\\dhava\\Desktop\\SMA\\fo270525.csv"
+options_file = "C:\\Users\\dhava\\Desktop\\SMA\\op270525.csv"
+
+# Read and process Futures data
+fut_df = pd.read_csv(futures_file)
+fut_df = fut_df[fut_df['CONTRACT_D'].str.startswith('FUTSTK')]
+fut_df['SYMBOL'] = fut_df['CONTRACT_D'].str.extract(r'FUTSTK(\w+)')
+fut_df['NET_CHANGE'] = pd.to_numeric(fut_df['NET_CHANGE'], errors='coerce')
+fut_df['OI'] = pd.to_numeric(fut_df['OI_NO_CON'], errors='coerce')
+fut_df['VOLUME'] = pd.to_numeric(fut_df['TRADED_QUA'], errors='coerce')
+fut_df = fut_df.dropna(subset=['NET_CHANGE', 'OI', 'VOLUME'])
+
+# Apply thresholds
+oi_thresh = fut_df['OI'].quantile(0.5)
+vol_thresh = fut_df['VOLUME'].quantile(0.5)
+change_thresh = fut_df['NET_CHANGE'].abs().quantile(0.5)
+
+# Filter futures
+filtered_fut = fut_df[
+    (fut_df['OI'] >= oi_thresh) &
+    (fut_df['VOLUME'] <= vol_thresh) &
+    (fut_df['NET_CHANGE'].abs() <= change_thresh)
+].copy()
+
+# Rename for clarity before merge
+filtered_fut.rename(columns={
+    'CONTRACT_D': 'FUT_CONTRACT',
+    'NET_CHANGE': 'NET_CHANGE_FUT',
+    'OI': 'OI_FUT',
+    'VOLUME': 'VOLUME_FUT'
+}, inplace=True)
+
+# Read and process Options data
+opt_df = pd.read_csv(options_file)
+opt_df = opt_df[opt_df['CONTRACT_D'].str.contains('CE')]  # Call options only
+opt_df['SYMBOL'] = opt_df['CONTRACT_D'].str.extract(r'OPTSTK(\w+)')
+opt_df['PREMIUM_TR'] = pd.to_numeric(opt_df['PREMIUM_TR'], errors='coerce')
+opt_df['OI'] = pd.to_numeric(opt_df['OI_NO_CON'], errors='coerce')
+opt_df = opt_df.dropna(subset=['PREMIUM_TR', 'OI'])
+
+# Apply option premium threshold
+premium_thresh = opt_df['PREMIUM_TR'].quantile(0.5)
+filtered_opt = opt_df[opt_df['PREMIUM_TR'] >= premium_thresh].copy()
+
+# Rename for clarity before merge
+filtered_opt.rename(columns={
+    'CONTRACT_D': 'OPT_CONTRACT',
+    'OI': 'OI_OPT'
+}, inplace=True)
+
+# Merge on SYMBOL
+merged = pd.merge(filtered_fut, filtered_opt, on='SYMBOL')
+
+# Select and display relevant columns
+final = merged[[
+    'SYMBOL',
+    'FUT_CONTRACT',
+    'NET_CHANGE_FUT',
+    'OI_FUT',
+    'VOLUME_FUT',
+    'OPT_CONTRACT',
+    'PREMIUM_TR',
+    'OI_OPT'
+]]
+
+# Display result
+print(final.head())
+
+# Optionally save to Excel
+final.to_excel("output_filtered_trades.xlsx", index=False)
